@@ -73,7 +73,7 @@ public class URL2ImageService {
             out.write(urlImage.getData());
         } catch (IOException ex) {
             logger.error("Unable to write image to response : {} with parameters {}", url, params);
-            throw new URL2ImageException("Unable to write image to response: ", ex);
+            throw new URL2ImageException("Unable to write image to response : ", ex);
         }
     }
 
