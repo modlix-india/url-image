@@ -1,12 +1,21 @@
 package com.modlix.urlscreenshot.service;
 
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.IOException;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
 import java.io.OutputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.StandardOpenOption;
 import java.time.Duration;
 import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+
+import javax.annotation.Nullable;
 
 import org.openqa.selenium.Dimension;
 import org.openqa.selenium.JavascriptExecutor;
@@ -17,7 +26,9 @@ import org.openqa.selenium.chrome.ChromeDriver;
 import org.openqa.selenium.chrome.ChromeOptions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.aop.framework.AopContext;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 
@@ -41,6 +52,9 @@ public class URL2ImageService {
     @Value("${chromedriver:/usr/bin/chromedriver}")
     private String chromeDriver;
 
+    @Value("${fileCachePath:/tmp/ehcache}")
+    private String fileCachePath;
+
     private Set<String> allowedDomainsList;
 
     private final ImageService imageService;
@@ -56,6 +70,12 @@ public class URL2ImageService {
         else
             allowedDomainsList = Stream.of(allowedDomains.split(",")).collect(Collectors.toSet());
         System.setProperty("webdriver.chrome.driver", chromeDriver);
+        try {
+            Files.createDirectories(Paths.get(this.fileCachePath));
+        } catch (IOException ex) {
+            logger.error("Unable to create cache directory: {}", this.fileCachePath);
+            throw new URL2ImageException("Unable to create cache directory: " + this.fileCachePath, ex);
+        }
     }
 
     public void get(String urlKey, HttpServletRequest request, HttpServletResponse response) {
@@ -66,11 +86,13 @@ public class URL2ImageService {
 
         URLImageParameters params = URLImageParameters.of(request);
 
+        System.out.println(params + " - " + params.hashCode());
+
         String eTag = url.hashCode() + "-" + params.hashCode();
 
         String ifNoneMatch = request.getHeader("If-None-Match");
 
-        URLImage urlImage = getURLImage(url, params, eTag);
+        URLImage urlImage = ((URL2ImageService) AopContext.currentProxy()).getURLImage(url, params, eTag);
 
         if (ifNoneMatch != null && ifNoneMatch.startsWith(eTag) && ifNoneMatch.endsWith(urlImage.getTimestamp() + "")) {
             response.setStatus(HttpServletResponse.SC_NOT_MODIFIED);
@@ -94,6 +116,11 @@ public class URL2ImageService {
 
     @Cacheable(value = "urlImage", key = "#eTag")
     public URLImage getURLImage(String url, URLImageParameters params, String eTag) {
+
+        URLImage urlImage = this.getURLImageFromDiskCache(eTag);
+
+        if (urlImage != null)
+            return urlImage;
 
         ChromeOptions options = new ChromeOptions();
         options.addArguments("--headless", "--disable-gpu");
@@ -125,7 +152,7 @@ public class URL2ImageService {
             driver.get(url);
 
             if (params.getWaitTime() > 0l)
-                Thread.sleep(Duration.ofSeconds(params.getWaitTime()).toMillis());
+                Thread.sleep(Duration.ofMillis(params.getWaitTime()).toMillis());
 
             sc = ((TakesScreenshot) driver).getScreenshotAs(OutputType.FILE);
 
@@ -140,7 +167,10 @@ public class URL2ImageService {
             driver.quit();
         }
 
-        return new URLImage(adjustImageSize(sc, params), url, params, System.currentTimeMillis());
+        urlImage = new URLImage(adjustImageSize(sc, params), url, params, System.currentTimeMillis());
+
+        this.writeURLImageToDiskCache(urlImage, eTag);
+        return urlImage;
     }
 
     private byte[] adjustImageSize(File sc, URLImageParameters params) {
@@ -150,6 +180,82 @@ public class URL2ImageService {
         } catch (Exception ex) {
             logger.error("Unable to resize image: {}", sc.getAbsolutePath());
             throw new URL2ImageException("Unable to resize image: " + sc.getAbsolutePath(), ex);
+        }
+    }
+
+    public void delete(String urlKey, HttpServletRequest request) {
+
+        String url = URL2ImageValidator.validateAndGetURL(request, urlKey);
+        URLImageParameters params = URLImageParameters.of(request);
+
+        String eTag = url.hashCode() + "-" + params.hashCode();
+
+        ((URL2ImageService) AopContext.currentProxy()).deleteURLImage(eTag);
+    }
+
+    @CacheEvict(value = "urlImage", key = "#eTag")
+    public void deleteURLImage(String eTag) {
+        logger.info("Deleted URLImage with eTag: {}", eTag);
+        this.deleteURLImageFromDiskCache(eTag);
+    }
+
+    @CacheEvict(value = "urlImage", allEntries = true)
+    public void deleteAll() {
+        logger.info("Deleted all URLImages");
+        this.deleteAllURLImageFromDiskCache();
+    }
+
+    @Nullable
+    private URLImage getURLImageFromDiskCache(String fileName) {
+        try {
+            Path path = Paths.get(this.fileCachePath, fileName);
+            if (!Files.exists(path))
+                return null;
+            try (ObjectInputStream ins = new ObjectInputStream(
+                    new FileInputStream(path.toFile()))) {
+                return (URLImage) ins.readObject();
+            }
+        } catch (IOException | ClassNotFoundException ex) {
+            logger.error("Unable to read URLImage from disk cache: {}", fileName);
+            throw new URL2ImageException("Unable to read URLImage from disk cache: " + fileName, ex);
+        }
+    }
+
+    private void writeURLImageToDiskCache(URLImage urlImage, String fileName) {
+        try {
+            Path path = Paths.get(this.fileCachePath, fileName);
+            try (ObjectOutputStream outs = new ObjectOutputStream(
+                    Files.newOutputStream(path, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING))) {
+                outs.writeObject(urlImage);
+            }
+        } catch (IOException ex) {
+            logger.error("Unable to write URLImage to disk cache: {}", fileName);
+            throw new URL2ImageException("Unable to write URLImage to disk cache: " + fileName, ex);
+        }
+    }
+
+    private void deleteURLImageFromDiskCache(String fileName) {
+        try {
+            Path path = Paths.get(this.fileCachePath, fileName);
+            Files.deleteIfExists(path);
+        } catch (IOException ex) {
+            logger.error("Unable to delete URLImage from disk cache: {}", fileName);
+            throw new URL2ImageException("Unable to delete URLImage from disk cache: " + fileName, ex);
+        }
+    }
+
+    private void deleteAllURLImageFromDiskCache() {
+        try {
+            Files.walk(Paths.get(this.fileCachePath)).filter(Files::isRegularFile).forEach(path -> {
+                try {
+                    Files.deleteIfExists(path);
+                } catch (IOException ex) {
+                    logger.error("Unable to delete URLImage from disk cache: {}", path);
+                }
+            });
+        } catch (IOException ex) {
+            logger.error("Unable to delete all URLImages from disk cache");
+            throw new URL2ImageException("Unable to delete all URLImages from disk cache", ex);
         }
     }
 }

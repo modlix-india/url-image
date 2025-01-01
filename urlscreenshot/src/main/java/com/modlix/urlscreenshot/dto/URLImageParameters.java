@@ -2,6 +2,7 @@ package com.modlix.urlscreenshot.dto;
 
 import java.io.Serial;
 import java.io.Serializable;
+import java.util.Objects;
 
 import com.modlix.urlscreenshot.enums.DeviceType;
 import com.modlix.urlscreenshot.enums.ImageSizeType;
@@ -9,12 +10,10 @@ import com.modlix.urlscreenshot.enums.ImageType;
 
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.Data;
-import lombok.EqualsAndHashCode;
 import lombok.ToString;
 import lombok.experimental.Accessors;
 
 @Data
-@EqualsAndHashCode(exclude = { "waitTime" })
 @Accessors(chain = true)
 @ToString
 public class URLImageParameters implements Serializable {
@@ -36,6 +35,35 @@ public class URLImageParameters implements Serializable {
     private String cacheControl = "public, max-age=604800";
 
     private Long waitTime = 0l;
+
+    @Override
+    public int hashCode() {
+
+        Object[] values = { deviceType.toString().hashCode(), deviceWidth, deviceHeight,
+                imageSizeType.toString().hashCode(), imageWidth, imageHeight, imageType.toString().hashCode(),
+                imageBandColor, cacheControl };
+
+        return Objects.hash(values);
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+
+        if (this == obj)
+            return true;
+
+        if (obj == null || getClass() != obj.getClass())
+            return false;
+
+        URLImageParameters other = (URLImageParameters) obj;
+
+        return Objects.equals(deviceType, other.deviceType) && Objects.equals(deviceWidth, other.deviceWidth)
+                && Objects.equals(deviceHeight, other.deviceHeight)
+                && Objects.equals(imageSizeType, other.imageSizeType)
+                && Objects.equals(imageWidth, other.imageWidth) && Objects.equals(imageHeight, other.imageHeight)
+                && Objects.equals(imageType, other.imageType) && Objects.equals(imageBandColor, other.imageBandColor)
+                && Objects.equals(cacheControl, other.cacheControl);
+    }
 
     public Integer getDeviceWidth() {
         return deviceWidth == null || deviceWidth == 0 ? deviceType.getWidth() : deviceWidth;
