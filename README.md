@@ -69,6 +69,8 @@ curl -s http://localhost:8080/url2image/<url>?<request parameters>
 
    1. **imageBandColor** - When the image size is not matching the aspect ratio of the device type then the image is centered. It makes transparent in the case of PNG and WEBP format when the image is centered but it defaults to black in case of JPEG. If the color is specified in the format of HTML HEX color code it will be used.
 
-   1. **cacheControl** - Default cache control is **"max-age=604800"**, but if you specify a different option that is used. If the cacheControl contains **"must-revalidate"**, an Etag is generated and honored with If-None-Match.
+   1. **cacheControl** - Default cache control is **"public, max-age=604800"**, but if you specify a different option that is used. If the cacheControl contains **"must-revalidate"**, an Etag is generated and honored with If-None-Match.\
+
+   1. **waitTime** - Wait time determines how many milli seconds the thread needs to wait before taking a screenshot. By default 0 seocnds.
 
 ## Configuration

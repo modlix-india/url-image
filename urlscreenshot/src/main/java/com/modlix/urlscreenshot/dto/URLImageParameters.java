@@ -14,7 +14,7 @@ import lombok.ToString;
 import lombok.experimental.Accessors;
 
 @Data
-@EqualsAndHashCode
+@EqualsAndHashCode(exclude = { "waitTime" })
 @Accessors(chain = true)
 @ToString
 public class URLImageParameters implements Serializable {
@@ -30,10 +30,12 @@ public class URLImageParameters implements Serializable {
     private Integer imageWidth;
     private Integer imageHeight;
 
-    private ImageType imageType = ImageType.WEBP;
+    private ImageType imageType = ImageType.PNG;
 
     private String imageBandColor;
     private String cacheControl = "public, max-age=604800";
+
+    private Long waitTime = 0l;
 
     public Integer getDeviceWidth() {
         return deviceWidth == null || deviceWidth == 0 ? deviceType.getWidth() : deviceWidth;
@@ -98,6 +100,11 @@ public class URLImageParameters implements Serializable {
         String cacheControl = request.getParameter("cacheControl");
         if (cacheControl != null) {
             parameters.setCacheControl(cacheControl);
+        }
+
+        String waitTime = request.getParameter("waitTime");
+        if (waitTime != null) {
+            parameters.setWaitTime(Long.parseLong(waitTime));
         }
 
         return parameters;

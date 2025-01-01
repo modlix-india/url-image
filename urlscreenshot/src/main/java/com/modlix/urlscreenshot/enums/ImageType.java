@@ -2,8 +2,7 @@ package com.modlix.urlscreenshot.enums;
 
 public enum ImageType {
     PNG("image/png"),
-    JPEG("image/jpeg"),
-    WEBP("image/webp");
+    JPEG("image/jpeg");
 
     private final String contentType;
 

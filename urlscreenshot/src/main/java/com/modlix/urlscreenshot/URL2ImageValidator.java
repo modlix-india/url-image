@@ -9,6 +9,8 @@ import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.modlix.urlscreenshot.exception.URL2ImageException;
+
 import jakarta.servlet.http.HttpServletRequest;
 
 public class URL2ImageValidator {
@@ -59,9 +61,9 @@ public class URL2ImageValidator {
             url = url.substring(1);
 
         if (url.startsWith("https/"))
-            url = "https://" + url.substring(7);
+            url = "https://" + url.substring(6);
         else if (url.startsWith("http/"))
-            url = "http://" + url.substring(6);
+            url = "http://" + url.substring(5);
         else
             url = "https://" + url;
 

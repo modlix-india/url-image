@@ -1,4 +1,4 @@
-package com.modlix.urlscreenshot;
+package com.modlix.urlscreenshot.exception;
 
 import java.io.Serial;
 
