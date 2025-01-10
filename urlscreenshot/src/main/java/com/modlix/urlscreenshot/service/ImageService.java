@@ -4,8 +4,8 @@ import java.awt.Color;
 import java.awt.Graphics2D;
 import java.awt.Image;
 import java.awt.image.BufferedImage;
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
-import java.io.File;
 import java.io.IOException;
 
 import javax.imageio.ImageIO;
@@ -17,11 +17,12 @@ import com.modlix.urlscreenshot.enums.ImageType;
 @Service
 public class ImageService {
 
-    public byte[] resizeImage(File sc, ImageType imageType, Integer imageWidth,
+    public byte[] resizeImage(byte[] sc, ImageType imageType, Integer imageWidth,
             Integer imageHeight,
             String imageBandColor) throws IOException {
 
-        BufferedImage bi = ImageIO.read(sc);
+        ByteArrayInputStream bis = new ByteArrayInputStream(sc);
+        BufferedImage bi = ImageIO.read(bis);
 
         if (imageWidth != 0 && imageHeight != 0) {
             bi = resize(bi, imageType, imageWidth, imageHeight, imageBandColor);
