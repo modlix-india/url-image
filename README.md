@@ -96,14 +96,10 @@ Before getting into configuration here is a birds eye view of how this service w
 
 Create an external application.properites file and override the default values.
 
-1.  allowed.domains
+1.  **allowed.domains**
 
     A comma separated value with list of domains from which you can take an image of a url. Default allows all domains.
 
-2.  chromedriver
-
-    Path to the installed chrome driver. Default is /usr/bin/chromedriver.
-
-3.  fileCachePath
+1.  **fileCachePath**
 
     Path to the file cache where all the images are stored. Defualt value is /tmp/ehcache.
