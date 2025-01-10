@@ -1,6 +1,5 @@
 package com.modlix.urlscreenshot.service;
 
-import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.ObjectInputStream;
@@ -15,15 +14,6 @@ import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import javax.annotation.Nullable;
-
-import org.openqa.selenium.Dimension;
-import org.openqa.selenium.JavascriptExecutor;
-import org.openqa.selenium.OutputType;
-import org.openqa.selenium.TakesScreenshot;
-import org.openqa.selenium.WebDriver;
-import org.openqa.selenium.chrome.ChromeDriver;
-import org.openqa.selenium.chrome.ChromeOptions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.aop.framework.AopContext;
@@ -32,12 +22,22 @@ import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 
+import com.microsoft.playwright.Browser;
+import com.microsoft.playwright.Browser.NewContextOptions;
+import com.microsoft.playwright.BrowserContext;
+import com.microsoft.playwright.Page;
+import com.microsoft.playwright.Page.ScreenshotOptions;
+import com.microsoft.playwright.Playwright;
+import com.microsoft.playwright.options.ViewportSize;
 import com.modlix.urlscreenshot.URL2ImageValidator;
 import com.modlix.urlscreenshot.dto.URLImage;
 import com.modlix.urlscreenshot.dto.URLImageParameters;
+import com.modlix.urlscreenshot.enums.ImageSizeType;
 import com.modlix.urlscreenshot.exception.URL2ImageException;
 
+import jakarta.annotation.Nullable;
 import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 
@@ -49,15 +49,15 @@ public class URL2ImageService {
     @Value("${allowed.domains:}")
     private String allowedDomains;
 
-    @Value("${chromedriver:/usr/bin/chromedriver}")
-    private String chromeDriver;
-
     @Value("${fileCachePath:/tmp/ehcache}")
     private String fileCachePath;
 
     private Set<String> allowedDomainsList;
 
     private final ImageService imageService;
+
+    private Playwright playwright;
+    private Browser browser;
 
     public URL2ImageService(ImageService imageService) {
         this.imageService = imageService;
@@ -69,12 +69,24 @@ public class URL2ImageService {
             allowedDomainsList = Set.of();
         else
             allowedDomainsList = Stream.of(allowedDomains.split(",")).collect(Collectors.toSet());
-        System.setProperty("webdriver.chrome.driver", chromeDriver);
+
         try {
             Files.createDirectories(Paths.get(this.fileCachePath));
         } catch (IOException ex) {
             logger.error("Unable to create cache directory: {}", this.fileCachePath);
             throw new URL2ImageException("Unable to create cache directory: " + this.fileCachePath, ex);
+        }
+
+        this.playwright = Playwright.create();
+        this.browser = this.playwright.webkit().launch();
+    }
+
+    @PreDestroy
+    public void destroy() {
+        try {
+            this.playwright.close();
+        } catch (Exception ex) {
+            logger.error("Error while closing browser things.", ex);
         }
     }
 
@@ -122,40 +134,24 @@ public class URL2ImageService {
         if (urlImage != null)
             return urlImage;
 
-        ChromeOptions options = new ChromeOptions();
-        options.addArguments("--headless", "--disable-gpu");
+        byte[] sc;
 
-        WebDriver driver = new ChromeDriver(options);
-        File sc = null;
+        NewContextOptions options = new NewContextOptions();
+        options.setViewportSize(new ViewportSize(params.getDeviceWidth(), params.getDeviceHeight()));
+        try (BrowserContext context = this.browser.newContext(options)) {
 
-        try {
-            // Set Device dimensions to get the screenshot of the size given device
-            // dimension.
-            options.addArguments("--window-size=" + params.getDeviceWidth() + "," + params.getDeviceHeight());
+            Page page = context.newPage();
 
-            JavascriptExecutor js = (JavascriptExecutor) driver;
-
-            Long viewportWidth = (Long) js.executeScript("return window.innerWidth;");
-            Long viewportHeight = (Long) js.executeScript("return window.innerHeight;");
-
-            int outerWidth = driver.manage().window().getSize().getWidth();
-            int outerHeight = driver.manage().window().getSize().getHeight();
-
-            int chromeWidth = outerWidth - viewportWidth.intValue();
-            int chromeHeight = outerHeight - viewportHeight.intValue();
-
-            // Set the new outer dimensions to achieve exact viewport size
-            int targetWidth = params.getDeviceWidth() + chromeWidth;
-            int targetHeight = params.getDeviceHeight() + chromeHeight;
-            driver.manage().window().setSize(new Dimension(targetWidth, targetHeight));
-
-            driver.get(url);
+            page.navigate(url);
 
             if (params.getWaitTime() > 0l)
                 Thread.sleep(Duration.ofMillis(params.getWaitTime()).toMillis());
 
-            sc = ((TakesScreenshot) driver).getScreenshotAs(OutputType.FILE);
+            ScreenshotOptions ssOptions = new ScreenshotOptions();
+            if (params.getImageSizeType() == ImageSizeType.FULL || params.getImageSizeType() == ImageSizeType.FULLXHALF)
+                ssOptions.setFullPage(true);
 
+            sc = page.screenshot(ssOptions);
         } catch (InterruptedException ex) {
             Thread.currentThread().interrupt();
             logger.error("Thread was interrupted while taking screenshot of URL: {}", url);
@@ -163,8 +159,6 @@ public class URL2ImageService {
         } catch (Exception ex) {
             logger.error("Unable to take screenshot of URL: {}", url);
             throw new URL2ImageException("Unable to take screenshot of URL: " + url, ex);
-        } finally {
-            driver.quit();
         }
 
         urlImage = new URLImage(adjustImageSize(sc, params), url, params, System.currentTimeMillis());
@@ -173,13 +167,13 @@ public class URL2ImageService {
         return urlImage;
     }
 
-    private byte[] adjustImageSize(File sc, URLImageParameters params) {
+    private byte[] adjustImageSize(byte[] sc, URLImageParameters params) {
         try {
             return imageService.resizeImage(sc, params.getImageType(), params.getImageWidth(), params.getImageHeight(),
                     params.getImageBandColor());
         } catch (Exception ex) {
-            logger.error("Unable to resize image: {}", sc.getAbsolutePath());
-            throw new URL2ImageException("Unable to resize image: " + sc.getAbsolutePath(), ex);
+            logger.error("Unable to resize image: {}", params);
+            throw new URL2ImageException("Unable to resize image: " + params.toString(), ex);
         }
     }
 
