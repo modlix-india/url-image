@@ -4,11 +4,13 @@ import org.springframework.cache.CacheManager;
 import org.springframework.cache.caffeine.CaffeineCacheManager;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.web.servlet.config.annotation.CorsRegistry;
+import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
 import com.github.benmanes.caffeine.cache.Caffeine;
 
 @Configuration
-public class UrlScreenshotConfiguration {
+public class UrlScreenshotConfiguration implements WebMvcConfigurer {
 
     @SuppressWarnings("rawtypes")
     @Bean
@@ -22,5 +24,13 @@ public class UrlScreenshotConfiguration {
         CaffeineCacheManager caffeineCacheManager = new CaffeineCacheManager();
         caffeineCacheManager.setCaffeine(caffeine);
         return caffeineCacheManager;
+    }
+
+    @SuppressWarnings("null")
+    @Override
+    public void addCorsMappings(CorsRegistry registry) {
+
+        registry.addMapping("/**").allowedOrigins("*").allowedMethods("GET", "POST", "PUT", "DELETE")
+                .allowCredentials(false);
     }
 }
