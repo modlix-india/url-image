@@ -104,7 +104,7 @@ public class URL2ImageService {
 
         String ifNoneMatch = request.getHeader("If-None-Match");
 
-        URLImage urlImage = ((URL2ImageService) AopContext.currentProxy()).getURLImage(url, params, eTag);
+        URLImage urlImage = ((URL2ImageService) AopContext.currentProxy()).getURLImage(url, params, eTag, 0);
 
         if (ifNoneMatch != null && ifNoneMatch.startsWith(eTag) && ifNoneMatch.endsWith(urlImage.getTimestamp() + "")) {
             response.setStatus(HttpServletResponse.SC_NOT_MODIFIED);
@@ -127,7 +127,7 @@ public class URL2ImageService {
     }
 
     @Cacheable(value = "urlImage", key = "#eTag")
-    public URLImage getURLImage(String url, URLImageParameters params, String eTag) {
+    public URLImage getURLImage(String url, URLImageParameters params, String eTag, int count) {
 
         URLImage urlImage = this.getURLImageFromDiskCache(eTag);
 
@@ -138,9 +138,7 @@ public class URL2ImageService {
 
         NewContextOptions options = new NewContextOptions();
         options.setViewportSize(new ViewportSize(params.getDeviceWidth(), params.getDeviceHeight()));
-        try (BrowserContext context = this.browser.newContext(options)) {
-
-            Page page = context.newPage();
+        try (BrowserContext context = this.browser.newContext(options); Page page = context.newPage()) {
 
             page.navigate(url);
 
@@ -158,6 +156,8 @@ public class URL2ImageService {
             throw new URL2ImageException("Thread was interrupted while taking screenshot of URL: " + url, ex);
         } catch (Exception ex) {
             logger.error("Unable to take screenshot of URL: {}", url);
+            if (count < 3)
+                return ((URL2ImageService) AopContext.currentProxy()).getURLImage(url, params, eTag, count + 1);
             throw new URL2ImageException("Unable to take screenshot of URL: " + url, ex);
         }
 
@@ -239,8 +239,8 @@ public class URL2ImageService {
     }
 
     private void deleteAllURLImageFromDiskCache() {
-        try {
-            Files.walk(Paths.get(this.fileCachePath)).filter(Files::isRegularFile).forEach(path -> {
+        try (Stream<Path> walkingStream = Files.walk(Paths.get(this.fileCachePath))) {
+            walkingStream.filter(Files::isRegularFile).forEach(path -> {
                 try {
                     Files.deleteIfExists(path);
                 } catch (IOException ex) {
