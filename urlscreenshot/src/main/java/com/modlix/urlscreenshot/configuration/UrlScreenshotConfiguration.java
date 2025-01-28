@@ -18,7 +18,7 @@ public class UrlScreenshotConfiguration implements WebMvcConfigurer {
         return Caffeine.newBuilder().maximumSize(100);
     }
 
-    @SuppressWarnings("rawtypes")
+    @SuppressWarnings({ "rawtypes", "unchecked" })
     @Bean
     public CacheManager cacheManager(Caffeine caffeine) {
         CaffeineCacheManager caffeineCacheManager = new CaffeineCacheManager();
