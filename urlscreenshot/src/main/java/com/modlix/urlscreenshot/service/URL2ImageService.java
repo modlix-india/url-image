@@ -10,6 +10,8 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
 import java.time.Duration;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -104,7 +106,22 @@ public class URL2ImageService {
 
         String ifNoneMatch = request.getHeader("If-None-Match");
 
-        URLImage urlImage = ((URL2ImageService) AopContext.currentProxy()).getURLImage(url, params, eTag, 0);
+        if (request.getParameter("force")!=null) {
+            ((URL2ImageService) AopContext.currentProxy()).deleteURLImage(eTag);
+        }
+
+        Map<String, String> localStorageMap = null;
+
+        if (request.getHeader("Authorization")!=null) {
+            localStorageMap = new HashMap<>();
+            String authToken = request.getHeader("Authorization");
+            if (!authToken.startsWith("\"") && !authToken.endsWith("\""))
+                authToken = "\"" + authToken + "\"";
+            localStorageMap.put("AuthToken", authToken);
+            localStorageMap.put("AuthTokenExpiry", request.getHeader("AuthTokenExpiry"));
+        }
+
+        URLImage urlImage = ((URL2ImageService) AopContext.currentProxy()).getURLImage(url, params, eTag, localStorageMap, 0);
 
         if (ifNoneMatch != null && ifNoneMatch.startsWith(eTag) && ifNoneMatch.endsWith(urlImage.getTimestamp() + "")) {
             response.setStatus(HttpServletResponse.SC_NOT_MODIFIED);
@@ -127,7 +144,7 @@ public class URL2ImageService {
     }
 
     @Cacheable(value = "urlImage", key = "#eTag")
-    public URLImage getURLImage(String url, URLImageParameters params, String eTag, int count) {
+    public URLImage getURLImage(String url, URLImageParameters params, String eTag, Map<String, String> localStorageMap, int count) {
 
         URLImage urlImage = this.getURLImageFromDiskCache(eTag);
 
@@ -140,9 +157,14 @@ public class URL2ImageService {
         options.setViewportSize(new ViewportSize(params.getDeviceWidth(), params.getDeviceHeight()));
         try (BrowserContext context = this.browser.newContext(options); Page page = context.newPage()) {
 
+            if (localStorageMap != null) {
+                context.addInitScript("window.localStorage.setItem('AuthToken', '"+localStorageMap.get("AuthToken")+"');");
+                context.addInitScript("window.localStorage.setItem('AuthTokenExpiry', "+localStorageMap.get("AuthTokenExpiry")+");");
+            }
+
             page.navigate(url);
 
-            if (params.getWaitTime() > 0l)
+            if (params.getWaitTime() > 0L)
                 Thread.sleep(Duration.ofMillis(params.getWaitTime()).toMillis());
 
             ScreenshotOptions ssOptions = new ScreenshotOptions();
@@ -157,7 +179,7 @@ public class URL2ImageService {
         } catch (Exception ex) {
             logger.error("Unable to take screenshot of URL: {}", url);
             if (count < 3)
-                return ((URL2ImageService) AopContext.currentProxy()).getURLImage(url, params, eTag, count + 1);
+                return ((URL2ImageService) AopContext.currentProxy()).getURLImage(url, params, eTag, localStorageMap, count + 1);
             throw new URL2ImageException("Unable to take screenshot of URL: " + url, ex);
         }
 
