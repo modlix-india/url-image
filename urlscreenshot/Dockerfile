@@ -12,4 +12,4 @@ EXPOSE 8080
 
 VOLUME [ "/logs", "/tmp/ehcache" ]
 
-ENTRYPOINT ["java", "-Dlogging.file.name=/logs/ehcache-${INSTANCE_ID}.log", "-jar", "urlscreenshot-1.0.0.jar"]
+ENTRYPOINT ["java", "-Xms256m", "-Xmx512m", "-XX:+UseContainerSupport", "-XX:MaxRAMPercentage=75.0", "-Dlogging.file.name=/logs/ehcache-${INSTANCE_ID}.log", "-jar", "urlscreenshot-1.0.0.jar"]

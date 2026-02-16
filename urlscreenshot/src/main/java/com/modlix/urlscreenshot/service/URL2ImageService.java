@@ -22,6 +22,7 @@ import org.springframework.aop.framework.AopContext;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import com.microsoft.playwright.Browser;
@@ -100,7 +101,7 @@ public class URL2ImageService {
 
         URLImageParameters params = URLImageParameters.of(request);
 
-        System.out.println(params + " - " + params.hashCode());
+        logger.debug("Request params: {} - hashCode: {}", params, params.hashCode());
 
         String eTag = url.hashCode() + "-" + params.hashCode();
 
@@ -156,6 +157,9 @@ public class URL2ImageService {
         NewContextOptions options = new NewContextOptions();
         options.setViewportSize(new ViewportSize(params.getDeviceWidth(), params.getDeviceHeight()));
         try (BrowserContext context = this.browser.newContext(options); Page page = context.newPage()) {
+
+            page.setDefaultTimeout(30000);
+            page.setDefaultNavigationTimeout(30000);
 
             if (localStorageMap != null) {
                 context.addInitScript("window.localStorage.setItem('AuthToken', '"+localStorageMap.get("AuthToken")+"');");
@@ -272,6 +276,28 @@ public class URL2ImageService {
         } catch (IOException ex) {
             logger.error("Unable to delete all URLImages from disk cache");
             throw new URL2ImageException("Unable to delete all URLImages from disk cache", ex);
+        }
+    }
+
+    @Scheduled(fixedRate = 3600000)
+    public void cleanupExpiredDiskCache() {
+        long expiryMillis = 24 * 60 * 60 * 1000L;
+        long now = System.currentTimeMillis();
+
+        try (Stream<Path> walkingStream = Files.walk(Paths.get(this.fileCachePath))) {
+            walkingStream.filter(Files::isRegularFile).forEach(path -> {
+                try {
+                    long lastModified = Files.getLastModifiedTime(path).toMillis();
+                    if (now - lastModified > expiryMillis) {
+                        Files.deleteIfExists(path);
+                        logger.info("Cleaned up expired disk cache entry: {}", path.getFileName());
+                    }
+                } catch (IOException ex) {
+                    logger.error("Unable to check/delete expired cache file: {}", path);
+                }
+            });
+        } catch (IOException ex) {
+            logger.error("Error during disk cache cleanup", ex);
         }
     }
 }
