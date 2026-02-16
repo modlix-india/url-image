@@ -9,13 +9,17 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
 import com.github.benmanes.caffeine.cache.Caffeine;
 
+import java.util.concurrent.TimeUnit;
+
 @Configuration
 public class UrlScreenshotConfiguration implements WebMvcConfigurer {
 
     @SuppressWarnings("rawtypes")
     @Bean
     public Caffeine caffeineConfig() {
-        return Caffeine.newBuilder().maximumSize(100);
+        return Caffeine.newBuilder()
+                .maximumSize(100)
+                .expireAfterWrite(1, TimeUnit.HOURS);
     }
 
     @SuppressWarnings({ "rawtypes", "unchecked" })

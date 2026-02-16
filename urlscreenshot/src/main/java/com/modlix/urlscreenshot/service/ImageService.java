@@ -41,35 +41,39 @@ public class ImageService {
 
         Graphics2D g = endBI.createGraphics();
 
-        if (imageType == ImageType.JPEG || (imageBandColor != null && !imageBandColor.isBlank())) {
-            if (imageBandColor == null || imageBandColor.isBlank())
-                g.setColor(Color.BLACK);
-            else
-                g.setColor(decodeFromHEXtoColor(imageBandColor));
+        try {
+            if (imageType == ImageType.JPEG || (imageBandColor != null && !imageBandColor.isBlank())) {
+                if (imageBandColor == null || imageBandColor.isBlank())
+                    g.setColor(Color.BLACK);
+                else
+                    g.setColor(decodeFromHEXtoColor(imageBandColor));
 
-            g.fillRect(0, 0, imageWidth, imageHeight);
+                g.fillRect(0, 0, imageWidth, imageHeight);
+            }
+
+            int x = 0;
+            int y = 0;
+
+            int newWidth;
+            int newHeight;
+
+            float widthRatio = (float) imageWidth / bi.getWidth();
+            float heightRatio = (float) imageHeight / bi.getHeight();
+
+            if (widthRatio < heightRatio) {
+                newWidth = imageWidth;
+                newHeight = (int) (bi.getHeight() * widthRatio);
+                y = (imageHeight - newHeight) / 2;
+            } else {
+                newHeight = imageHeight;
+                newWidth = (int) (bi.getWidth() * heightRatio);
+                x = (imageWidth - newWidth) / 2;
+            }
+
+            g.drawImage(bi.getScaledInstance(newWidth, newHeight, Image.SCALE_SMOOTH), x, y, null);
+        } finally {
+            g.dispose();
         }
-
-        int x = 0;
-        int y = 0;
-
-        int newWidth;
-        int newHeight;
-
-        float widthRatio = (float) imageWidth / bi.getWidth();
-        float heightRatio = (float) imageHeight / bi.getHeight();
-
-        if (widthRatio < heightRatio) {
-            newWidth = imageWidth;
-            newHeight = (int) (bi.getHeight() * widthRatio);
-            y = (imageHeight - newHeight) / 2;
-        } else {
-            newHeight = imageHeight;
-            newWidth = (int) (bi.getWidth() * heightRatio);
-            x = (imageWidth - newWidth) / 2;
-        }
-
-        g.drawImage(bi.getScaledInstance(newWidth, newHeight, Image.SCALE_SMOOTH), x, y, null);
 
         return endBI;
     }
