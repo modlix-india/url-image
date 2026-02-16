@@ -9,7 +9,7 @@ WORKDIR /app
 
 # Install Python dependencies first (Docker layer caching)
 COPY requirements.txt .
-RUN pip3 install --no-cache-dir --break-system-packages -r requirements.txt
+RUN pip3 install --no-cache-dir -r requirements.txt
 
 # Install only WebKit browser (--with-deps handles system libraries)
 RUN playwright install --with-deps webkit
