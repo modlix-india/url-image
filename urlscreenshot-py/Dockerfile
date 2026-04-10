@@ -19,7 +19,7 @@ COPY app/ app/
 
 ENV INSTANCE_ID=default
 ENV MALLOC_ARENA_MAX=4
-ENV ALLOWED_DOMAINS="modlix.com,*.modlix.com,sitezump.ai,*.sitezump.ai,adzump.ai,*.adzump.ai"
+ENV ALLOWED_DOMAINS="modlix.com,*.modlix.com,sitezump.ai,*.sitezump.ai,adzump.ai,*.adzump.ai,localhost"
 
 EXPOSE 6201
 
