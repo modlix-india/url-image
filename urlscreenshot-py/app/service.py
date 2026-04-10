@@ -54,7 +54,10 @@ class ScreenshotService:
 
         self._cleanup_task = asyncio.create_task(self._periodic_cleanup())
 
-        logger.info("ScreenshotService initialized. Browser launched.")
+        logger.info(
+            "ScreenshotService initialized. Browser launched. Allowed domains: %s",
+            self._allowed_domains,
+        )
 
     async def shutdown(self) -> None:
         if self._cleanup_task:
