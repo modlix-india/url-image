@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 import pickle
 import time
 from pathlib import Path
@@ -33,6 +34,11 @@ class ScreenshotService:
             maxsize=settings.cache_max_size,
             ttl=settings.cache_ttl_seconds,
         )
+        self._failures: TTLCache = TTLCache(
+            maxsize=settings.failure_cache_max_size,
+            ttl=settings.failure_cache_ttl_seconds,
+        )
+        self._in_flight: dict[str, asyncio.Task] = {}
         self._cleanup_task: Optional[asyncio.Task] = None
         self._allowed_domains: set[str] = set()
 
@@ -90,19 +96,77 @@ class ScreenshotService:
     ) -> URLImage:
         if force:
             self._delete_from_cache(etag)
+            self._failures.pop(etag, None)
 
         cached = self._cache.get(etag)
+        if cached is None:
+            cached = self._get_from_disk_cache(etag)
+            if cached is not None:
+                self._cache[etag] = cached
+
         if cached is not None:
+            if self._is_stale(cached) and etag not in self._failures:
+                self._refresh_in_background(url, params, etag, local_storage)
             return cached
 
-        disk_cached = self._get_from_disk_cache(etag)
-        if disk_cached is not None:
-            self._cache[etag] = disk_cached
-            return disk_cached
+        failure = self._failures.get(etag)
+        if failure is not None:
+            raise URL2ImageError(failure)
 
-        url_image = await self._take_screenshot_with_retry(
-            url, params, etag, local_storage, attempt=0
+        # Shield so a client disconnect doesn't cancel a capture others are waiting on.
+        return await asyncio.shield(
+            self._capture_once(url, params, etag, local_storage)
         )
+
+    def _is_stale(self, url_image: URLImage) -> bool:
+        age_ms = int(time.time() * 1000) - url_image.timestamp
+        return age_ms > settings.refresh_after_seconds * 1000
+
+    def _capture_once(
+        self,
+        url: str,
+        params: URLImageParameters,
+        etag: str,
+        local_storage: dict[str, str] | None,
+    ) -> asyncio.Task:
+        """Return the in-flight capture for this etag, starting one if needed."""
+        task = self._in_flight.get(etag)
+        if task is None:
+            task = asyncio.create_task(
+                self._capture_and_store(url, params, etag, local_storage)
+            )
+            self._in_flight[etag] = task
+            task.add_done_callback(lambda _: self._in_flight.pop(etag, None))
+        return task
+
+    def _refresh_in_background(
+        self,
+        url: str,
+        params: URLImageParameters,
+        etag: str,
+        local_storage: dict[str, str] | None,
+    ) -> None:
+        if etag in self._in_flight:
+            return
+        logger.info("Refreshing stale URLImage in background: %s", url)
+        task = self._capture_once(url, params, etag, local_storage)
+        # Nobody awaits a background refresh; retrieve the exception so it isn't reported as unhandled.
+        task.add_done_callback(lambda t: t.cancelled() or t.exception())
+
+    async def _capture_and_store(
+        self,
+        url: str,
+        params: URLImageParameters,
+        etag: str,
+        local_storage: dict[str, str] | None,
+    ) -> URLImage:
+        try:
+            url_image = await self._take_screenshot_with_retry(
+                url, params, etag, local_storage, attempt=0
+            )
+        except URL2ImageError as ex:
+            self._failures[etag] = str(ex)
+            raise
 
         self._cache[etag] = url_image
         self._write_to_disk_cache(url_image, etag)
@@ -223,18 +287,25 @@ class ScreenshotService:
             return None
         try:
             with open(path, "rb") as f:
-                return pickle.load(f)
+                url_image = pickle.load(f)
+            # mtime tracks last access; cleanup evicts by it.
+            os.utime(path)
+            return url_image
         except Exception:
             logger.error("Unable to read URLImage from disk cache: %s", filename)
             return None
 
     def _write_to_disk_cache(self, url_image: URLImage, filename: str) -> None:
         path = Path(settings.file_cache_path) / filename
+        tmp_path = path.with_name(f".{filename}.tmp")
         try:
-            with open(path, "wb") as f:
+            # Write then rename so a concurrent read never sees a partial file.
+            with open(tmp_path, "wb") as f:
                 pickle.dump(url_image, f)
+            os.replace(tmp_path, path)
         except Exception:
             logger.error("Unable to write URLImage to disk cache: %s", filename)
+            tmp_path.unlink(missing_ok=True)
 
     def _delete_from_disk_cache(self, filename: str) -> None:
         path = Path(settings.file_cache_path) / filename
@@ -256,24 +327,42 @@ class ScreenshotService:
             logger.error("Unable to delete all URLImages from disk cache")
 
     async def _periodic_cleanup(self) -> None:
-        """Delete disk cache files older than 24 hours, every hour."""
         while True:
             await asyncio.sleep(settings.disk_cache_cleanup_interval_seconds)
             try:
-                now = time.time()
-                cache_dir = Path(settings.file_cache_path)
-                for file_path in cache_dir.iterdir():
-                    if file_path.is_file():
-                        try:
-                            age = now - file_path.stat().st_mtime
-                            if age > settings.disk_cache_expiry_seconds:
-                                file_path.unlink()
-                                logger.info(
-                                    "Cleaned up expired cache: %s", file_path.name
-                                )
-                        except Exception:
-                            logger.error(
-                                "Unable to check/delete expired cache: %s", file_path
-                            )
+                self._cleanup_disk_cache()
             except Exception:
-                logger.error("Error during disk cache cleanup")
+                logger.error("Error during disk cache cleanup", exc_info=True)
+
+    def _cleanup_disk_cache(self) -> None:
+        """Evict files not accessed within the expiry window, then least recently
+        used files until the cache fits within the size limit."""
+        now = time.time()
+        kept: list[tuple[float, int, Path]] = []
+        for file_path in Path(settings.file_cache_path).iterdir():
+            if not file_path.is_file():
+                continue
+            try:
+                stat = file_path.stat()
+                if now - stat.st_mtime > settings.disk_cache_expiry_seconds:
+                    file_path.unlink()
+                    logger.info("Evicted unused cache: %s", file_path.name)
+                else:
+                    kept.append((stat.st_mtime, stat.st_size, file_path))
+            except Exception:
+                logger.error("Unable to check/delete cache file: %s", file_path)
+
+        total = sum(size for _, size, _ in kept)
+        if total <= settings.disk_cache_max_bytes:
+            return
+
+        kept.sort(key=lambda entry: entry[0])
+        for _, size, file_path in kept:
+            if total <= settings.disk_cache_max_bytes:
+                break
+            try:
+                file_path.unlink()
+                total -= size
+                logger.info("Evicted cache over size limit: %s", file_path.name)
+            except Exception:
+                logger.error("Unable to delete cache file: %s", file_path)
